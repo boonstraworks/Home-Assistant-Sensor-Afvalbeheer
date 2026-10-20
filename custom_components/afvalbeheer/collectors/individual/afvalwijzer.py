@@ -43,6 +43,10 @@ class AfvalwijzerCollector(WasteCollector):
         'md': WASTE_TYPE_PACKAGES,
     }
 
+    # Streams the API files under the type of another stream, so only their nameType tells them
+    # apart. Meppel sends VET-goed as type "keukenafval", which would otherwise show up as GFT.
+    NAME_TYPES_MAPPED_BY_NAME = {'vet-goed'}
+
     def __init__(self, hass, waste_collector, postcode, street_number, suffix, custom_mapping):
         super().__init__(hass, waste_collector, postcode, street_number, suffix, custom_mapping)
         self.apikey = '5ef443e778f41c4f75c69459eea6e6ae0c2d92de729aa0fc61653815fbd6a8ca'
@@ -53,6 +57,12 @@ class AfvalwijzerCollector(WasteCollector):
         get_url = 'https://api.{}.nl/webservices/appsinput/?apikey={}&method=postcodecheck&postcode={}&street=&huisnummer={}&toevoeging={}&app_name=afvalwijzer&platform=web&afvaldata={}&langs=nl'.format(
                 self.waste_collector_url, self.apikey, self.postcode, self.street_number, self.suffix, datetime.today().strftime('%Y-%m-%d'))
         return requests.get(get_url, timeout=DEFAULT_REQUEST_TIMEOUT)
+
+    def __waste_name(self, item):
+        name_type = (item.get('nameType') or '').strip().lower()
+        if name_type in self.NAME_TYPES_MAPPED_BY_NAME:
+            return name_type
+        return item['type']
 
     async def update(self):
         _LOGGER.debug("Updating Waste collection dates using Afvalwijzer API")
@@ -79,14 +89,15 @@ class AfvalwijzerCollector(WasteCollector):
                 if not item['date']:
                     continue
 
-                waste_type = self.map_waste_type(item['type'])
+                waste_name = self.__waste_name(item)
+                waste_type = self.map_waste_type(waste_name)
                 if not waste_type:
                     continue
 
                 collection = WasteCollection.create(
                     date=datetime.strptime(item['date'], '%Y-%m-%d'),
                     waste_type=waste_type,
-                    waste_type_slug=item['type']
+                    waste_type_slug=waste_name
                 )
                 if collection not in self.collections:
                     self.collections.add(collection)
